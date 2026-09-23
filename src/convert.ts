@@ -140,17 +140,25 @@ function convertMessagesToInput(messages: unknown[]): Record<string, unknown>[] 
   return input;
 }
 
+/** Codex Responses `function_call` items require `id` to start with `fc`. */
+export function responsesFunctionCallItemId(callId: string): string {
+  if (callId.startsWith("fc")) return callId;
+  const suffix = callId.startsWith("call_") ? callId.slice("call_".length) : callId;
+  return `fc_${suffix}`;
+}
+
 function convertAssistantToolCall(tc: unknown): Record<string, unknown> | null {
   if (!tc || typeof tc !== "object") return null;
   const t = tc as Record<string, unknown>;
   const fn = t["function"] as Record<string, unknown> | undefined;
   const name = typeof fn?.["name"] === "string" ? fn["name"] : "";
   const args = typeof fn?.["arguments"] === "string" ? fn["arguments"] : "";
-  const id = typeof t["id"] === "string" ? t["id"] : crypto.randomUUID();
+  const callId =
+    typeof t["id"] === "string" ? t["id"] : `call_${crypto.randomUUID().replace(/-/g, "")}`;
   return {
     type: "function_call",
-    id,
-    call_id: id,
+    id: responsesFunctionCallItemId(callId),
+    call_id: callId,
     name,
     arguments: args,
     status: "completed",
