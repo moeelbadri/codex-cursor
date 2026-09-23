@@ -3,6 +3,7 @@
 
 import type { LogLevel } from "./log.ts";
 import pkg from "../package.json" with { type: "json" };
+import { CodexAuth } from "./auth.ts";
 import { ModelsCatalog } from "./models.ts";
 import { resolveModelsCachePath } from "./paths.ts";
 import { startServer, type ReasoningEffort, type ServerConfig } from "./server.ts";
@@ -132,7 +133,8 @@ console.log(
 );
 
 const modelsPath = resolveModelsCachePath(config.authPath);
-void new ModelsCatalog(modelsPath).listModels().then((listed) => {
+const startupAuth = new CodexAuth(config.authPath);
+void new ModelsCatalog(modelsPath, startupAuth).listModels().then((listed) => {
   process.stdout.write(
     `  models list:         ${listed.source} (${listed.ids.length} ids)\n` +
       `  models cache file:   ${listed.cachePath}\n`,

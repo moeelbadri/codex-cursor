@@ -8,12 +8,13 @@ describe("parseModelsCacheJson", () => {
         models: [
           { slug: "gpt-5.4", visibility: "list", priority: 1 },
           { slug: "gpt-5.5", visibility: "list", priority: 10 },
-          { slug: "hidden-model", visibility: "hide" },
+          { slug: "api-only", visibility: "hide" },
+          { slug: "hidden-model", visibility: "none" },
           { slug: "nope", supported_in_api: false },
         ],
       }),
     );
-    expect(ids).toEqual(["gpt-5.5", "gpt-5.4"]);
+    expect(ids).toEqual(["gpt-5.5", "gpt-5.4", "api-only"]);
   });
 
   test("invalid json yields empty list for caller fallback", () => {

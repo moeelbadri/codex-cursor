@@ -48,7 +48,7 @@ export function startServer(config: ServerConfig): ReturnType<typeof Bun.serve> 
   const auth = new CodexAuth(config.authPath);
   const upstream = new UpstreamClient(auth);
   const quota = new QuotaClient(auth);
-  const models = new ModelsCatalog(resolveModelsCachePath(config.authPath));
+  const models = new ModelsCatalog(resolveModelsCachePath(config.authPath), auth);
   const sessionId = crypto.randomUUID();
 
   const server = Bun.serve({

@@ -85,9 +85,11 @@ cloudflared tunnel --url http://127.0.0.1:4141
 3. Click **Verify**.
 4. In the model picker, add a custom model. Working slugs:
    `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.3-codex`, `gpt-5.3-codex-spark`.
-   The list comes from `GET /v1/models`, which reads slugs from your local
-   Codex CLI cache (`~/.codex/models_cache.json`). Refresh it with
-   `codex debug models` (or any recent `codex` run) if new models are missing.
+   `GET /v1/models` loads the live Codex catalog (`/backend-api/codex/models`,
+   same source as the CLI) when your `auth.json` token is valid, then falls
+   back to `~/.codex/models_cache.json`. Response header `x-codex-models-source`
+   is `remote`, `file`, or `fallback`. ChatGPT UI names (e.g. Sol, Astra) map
+   to slugs like `gpt-5.6-sol` — use the slug from `/v1/models`, not the label.
 
 ## Caveats
 

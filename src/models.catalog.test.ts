@@ -24,7 +24,7 @@ describe("ModelsCatalog", () => {
       }),
     );
     const listed = await new ModelsCatalog(cachePath).listModels();
-    expect(listed.source).toBe("cache");
-    expect(listed.ids.sort()).toEqual(["gpt-5.6-luna", "gpt-5.6-terra"]);
+    expect(listed.source).toBe("file");
+    expect(listed.ids.sort()).toEqual(["gpt-5.6-luna", "gpt-5.6-terra", "gpt-reserve"]);
   });
 });
