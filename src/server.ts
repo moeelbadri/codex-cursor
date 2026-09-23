@@ -6,6 +6,11 @@
 // metered OpenAI API key.
 
 import { CodexAuth } from "./auth.ts";
+import {
+  chatCompletionsToResponses,
+  isChatCompletionsShapedBody,
+  isResponsesShapedBody,
+} from "./convert.ts";
 import { type LogLevel, RequestLogger, usageFromCompleted, type Usage } from "./log.ts";
 import { UpstreamClient, UpstreamError, type UpstreamStream } from "./upstream.ts";
 
@@ -147,9 +152,10 @@ function handleListModels(): Response {
 }
 
 // `/v1/chat/completions` is what Cursor's "Custom OpenAI Base URL" override
-// targets. Cursor 1.0+ sends Responses-API-shaped bodies on that path
-// (`input`, `instructions`, `reasoning`, ...), so this handler is just a
-// thin wrapper that parses the body and routes it through the passthrough.
+// targets. Newer Cursor builds send Responses-API-shaped bodies on that path
+// (`input`, `instructions`, `reasoning`, ...); some builds still send classic
+// Chat Completions bodies (`messages`, nested `tools[].function`, ...). Both
+// are normalized to Responses shape before forwarding upstream.
 async function handleChatCompletions(req: Request, ctx: RequestCtx): Promise<Response> {
   const rawBody = await req.text();
   let parsed: Record<string, unknown>;
@@ -168,16 +174,12 @@ async function handleChatCompletions(req: Request, ctx: RequestCtx): Promise<Res
     );
   }
 
-  if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed["input"])) {
+  if (!parsed || typeof parsed !== "object") {
     logIncomingBody("unsupported-shape", req, rawBody);
-    const presentKeys =
-      parsed && typeof parsed === "object" ? Object.keys(parsed).join(", ") : "(non-object)";
     return Response.json(
       {
         error: {
-          message:
-            `this proxy only accepts OpenAI Responses-API bodies (with an "input" array). ` +
-            `Got keys: [${presentKeys}]. See README "How it works" for the request shape.`,
+          message: "request body must be a JSON object",
           type: "invalid_request_error",
         },
       },
@@ -185,7 +187,41 @@ async function handleChatCompletions(req: Request, ctx: RequestCtx): Promise<Res
     );
   }
 
-  return handleResponsesPassthrough(req, ctx, parsed);
+  let responsesBody: Record<string, unknown>;
+  if (isResponsesShapedBody(parsed)) {
+    responsesBody = parsed;
+  } else if (isChatCompletionsShapedBody(parsed)) {
+    try {
+      responsesBody = chatCompletionsToResponses(parsed);
+    } catch (err) {
+      logIncomingBody("convert-failed", req, rawBody);
+      return Response.json(
+        {
+          error: {
+            message: `could not convert chat completions body: ${(err as Error).message}`,
+            type: "invalid_request_error",
+          },
+        },
+        { status: 400 },
+      );
+    }
+  } else {
+    logIncomingBody("unsupported-shape", req, rawBody);
+    const presentKeys = Object.keys(parsed).join(", ");
+    return Response.json(
+      {
+        error: {
+          message:
+            `request body must include either an "input" array (Responses API) or a ` +
+            `"messages" array (Chat Completions). Got keys: [${presentKeys}].`,
+          type: "invalid_request_error",
+        },
+      },
+      { status: 400 },
+    );
+  }
+
+  return handleResponsesPassthrough(req, ctx, responsesBody);
 }
 
 // Dumps an incoming request body that the proxy couldn't translate. Useful
@@ -479,7 +515,7 @@ function sanitizeResponsesRequest(
   if (typeof out["service_tier"] !== "string") out["service_tier"] = "priority";
   // The Codex Responses endpoint requires a prompt_cache_key for cache hits;
   // mirror the codex CLI by using the per-process session id when Cursor
-  // doesn't supply one.
+  // doesn't supply one (Chat Completions `user` is mapped to this in convert.ts).
   if (typeof out["prompt_cache_key"] !== "string") out["prompt_cache_key"] = sessionId;
   // Honor whatever `reasoning.effort` the client sent (Cursor picks it
   // intentionally per use case \u2014 chat vs Tab vs composer can want

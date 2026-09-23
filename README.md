@@ -8,6 +8,16 @@ It reuses the access tokens that the `codex` CLI stores in
 `~/.codex/auth.json` and translates Cursor's `/v1/chat/completions` traffic
 to the ChatGPT backend's Responses API.
 
+`POST /v1/chat/completions` accepts **both** wire formats Cursor may send:
+
+- **Responses API** bodies with an `input` array (newer Cursor builds)
+- **Chat Completions** bodies with a `messages` array (some stable builds)
+
+Chat Completions requests are converted automatically (`messages` → `input`,
+nested `tools[].function` → flat Responses tools, and Cursor's stable `user`
+id → `prompt_cache_key`). Fields the upstream does not understand (for example
+`stream_options`) are dropped.
+
 > Calls a private ChatGPT/Codex backend with the same credentials and limits
 > as the `codex` CLI. Personal use only.
 
