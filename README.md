@@ -85,7 +85,9 @@ cloudflared tunnel --url http://127.0.0.1:4141
 3. Click **Verify**.
 4. In the model picker, add a custom model. Working slugs:
    `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.3-codex`, `gpt-5.3-codex-spark`.
-   The exact list is returned by `GET /v1/models`.
+   The list comes from `GET /v1/models`, which reads slugs from your local
+   Codex CLI cache (`~/.codex/models_cache.json`). Refresh it with
+   `codex debug models` (or any recent `codex` run) if new models are missing.
 
 ## Caveats
 

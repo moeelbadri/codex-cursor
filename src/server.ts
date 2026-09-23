@@ -18,6 +18,7 @@ import {
   usageFromCompleted,
   type Usage,
 } from "./log.ts";
+import { ModelsCatalog, resolveModelsCachePath } from "./models.ts";
 import { QuotaClient } from "./quota.ts";
 import { UpstreamClient, UpstreamError, type UpstreamStream } from "./upstream.ts";
 
@@ -42,24 +43,11 @@ export type ServerConfig = {
   logLevel: LogLevel;
 };
 
-// Models the ChatGPT/Codex backend currently accepts via this auth mode.
-// Sourced from ~/.codex/models_cache.json on a working codex CLI install.
-// Cursor surfaces these in the model picker; you can also type any other slug
-// the backend accepts at request time.
-const PUBLISHED_MODELS = [
-  "gpt-5.5",
-  "gpt-5.4",
-  "gpt-5.4-mini",
-  "gpt-5.3-codex",
-  "gpt-5.3-codex-spark",
-  "gpt-5.2",
-  "codex-auto-review",
-];
-
 export function startServer(config: ServerConfig): ReturnType<typeof Bun.serve> {
   const auth = new CodexAuth(config.authPath);
   const upstream = new UpstreamClient(auth);
   const quota = new QuotaClient(auth);
+  const models = new ModelsCatalog(resolveModelsCachePath(config.authPath));
   const sessionId = crypto.randomUUID();
 
   const server = Bun.serve({
@@ -67,7 +55,7 @@ export function startServer(config: ServerConfig): ReturnType<typeof Bun.serve> 
     port: config.port,
     // Reasoning streams can take a while; let the request idle.
     idleTimeout: 240,
-    fetch: (req) => handle(req, { config, upstream, quota, sessionId }),
+    fetch: (req) => handle(req, { config, upstream, quota, models, sessionId }),
   });
   return server;
 }
@@ -76,6 +64,7 @@ type RequestCtx = {
   config: ServerConfig;
   upstream: UpstreamClient;
   quota: QuotaClient;
+  models: ModelsCatalog;
   sessionId: string;
 };
 
@@ -98,7 +87,7 @@ async function handle(req: Request, ctx: RequestCtx): Promise<Response> {
   }
   if (url.pathname === "/v1/models" && req.method === "GET") {
     if (!authorize(req, ctx.config)) return unauthorized();
-    return cors(handleListModels());
+    return cors(await handleListModels(ctx));
   }
   if (url.pathname === "/v1/chat/completions" && req.method === "POST") {
     if (!authorize(req, ctx.config)) return unauthorized();
@@ -157,11 +146,12 @@ function unauthorized(): Response {
   );
 }
 
-function handleListModels(): Response {
+async function handleListModels(ctx: RequestCtx): Promise<Response> {
+  const ids = await ctx.models.listModelIds();
   const created = Math.floor(Date.now() / 1000);
   return Response.json({
     object: "list",
-    data: PUBLISHED_MODELS.map((id) => ({
+    data: ids.map((id) => ({
       id,
       object: "model",
       created,
