@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 // Entry point. Parses CLI flags / env vars and starts the proxy.
 
-import { startServer, type ReasoningEffort, type ServerConfig } from "./server.ts";
 import type { LogLevel } from "./log.ts";
+import { ModelsCatalog, resolveModelsCachePath } from "./models.ts";
+import { startServer, type ReasoningEffort, type ServerConfig } from "./server.ts";
 
 const REASONING_EFFORTS: ReasoningEffort[] = ["minimal", "low", "medium", "high", "xhigh"];
 
@@ -127,6 +128,14 @@ console.log(
     `  cursor needs a public URL \u2014 expose this with:\n` +
     `    cloudflared tunnel --url http://${config.host}:${server.port}`,
 );
+
+const modelsPath = resolveModelsCachePath(config.authPath);
+void new ModelsCatalog(modelsPath).listModels().then((listed) => {
+  process.stdout.write(
+    `  models list:         ${listed.source} (${listed.ids.length} ids)\n` +
+      `  models cache file:   ${listed.cachePath}\n`,
+  );
+});
 
 const shutdown = () => {
   console.log("\nshutting down");

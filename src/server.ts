@@ -147,17 +147,21 @@ function unauthorized(): Response {
 }
 
 async function handleListModels(ctx: RequestCtx): Promise<Response> {
-  const ids = await ctx.models.listModelIds();
+  const listed = await ctx.models.listModels();
   const created = Math.floor(Date.now() / 1000);
-  return Response.json({
+  const body = {
     object: "list",
-    data: ids.map((id) => ({
+    data: listed.ids.map((id) => ({
       id,
       object: "model",
       created,
       owned_by: "codex-cursor",
     })),
-  });
+  };
+  const headers = new Headers({ "content-type": "application/json" });
+  headers.set("x-codex-models-source", listed.source);
+  headers.set("x-codex-models-cache", listed.cachePath);
+  return new Response(JSON.stringify(body), { headers });
 }
 
 // `/v1/chat/completions` is what Cursor's "Custom OpenAI Base URL" override

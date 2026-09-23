@@ -64,6 +64,13 @@ type ModelsListCache = {
   path: string;
   mtimeMs: number;
   ids: string[];
+  source: "cache" | "fallback";
+};
+
+export type ModelsListResult = {
+  ids: string[];
+  source: "cache" | "fallback";
+  cachePath: string;
 };
 
 export class ModelsCatalog {
@@ -71,23 +78,40 @@ export class ModelsCatalog {
 
   constructor(private readonly cachePath: string) {}
 
-  async listModelIds(): Promise<string[]> {
+  get cacheFilePath(): string {
+    return this.cachePath;
+  }
+
+  async listModels(): Promise<ModelsListResult> {
     const file = Bun.file(this.cachePath);
     const stat = await file.stat().catch(() => null);
     if (!stat) {
-      return [...FALLBACK_MODEL_IDS];
+      return {
+        ids: [...FALLBACK_MODEL_IDS],
+        source: "fallback",
+        cachePath: this.cachePath,
+      };
     }
     if (
       this.memory &&
       this.memory.path === this.cachePath &&
       this.memory.mtimeMs === stat.mtimeMs
     ) {
-      return this.memory.ids;
+      return {
+        ids: this.memory.ids,
+        source: this.memory.source,
+        cachePath: this.cachePath,
+      };
     }
     const text = await file.text().catch(() => "");
     const fromCache = parseModelsCacheJson(text);
-    const ids = fromCache.length > 0 ? fromCache : [...FALLBACK_MODEL_IDS];
-    this.memory = { path: this.cachePath, mtimeMs: stat.mtimeMs, ids };
-    return ids;
+    const source = fromCache.length > 0 ? "cache" : "fallback";
+    const ids = source === "cache" ? fromCache : [...FALLBACK_MODEL_IDS];
+    this.memory = { path: this.cachePath, mtimeMs: stat.mtimeMs, ids, source };
+    return {
+      ids,
+      source,
+      cachePath: this.cachePath,
+    };
   }
 }
