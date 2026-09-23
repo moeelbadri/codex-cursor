@@ -1,14 +1,14 @@
 // Model slugs for GET /v1/models: live Codex catalog (same as the CLI), then
 // ~/.codex/models_cache.json, then a small built-in fallback list.
 
-import type { CodexAuth } from "./auth.ts";
+import { CodexAuth } from "./auth.ts";
 import { resolveModelsCachePath } from "./paths.ts";
 
 export { resolveModelsCachePath };
 
-const CODEX_MODELS_URL = "https://chatgpt.com/backend-api/codex/models";
+export const CODEX_MODELS_URL = "https://chatgpt.com/backend-api/codex/models";
 /** Default when models_cache.json has no client_version (stale values shrink the catalog). */
-const DEFAULT_CODEX_CLIENT_VERSION = "0.144.4";
+export const DEFAULT_CODEX_CLIENT_VERSION = "0.144.4";
 const REMOTE_MODELS_TTL_MS = 5 * 60 * 1000;
 
 export const FALLBACK_MODEL_IDS = [
@@ -136,11 +136,9 @@ export class ModelsCatalog {
     return this.cachePath;
   }
 
-  private async resolveClientVersion(): Promise<string> {
+  async resolveClientVersion(): Promise<string> {
     const text = await Bun.file(this.cachePath).text().catch(() => "");
-    return (
-      readClientVersionFromCacheText(text) ?? DEFAULT_CODEX_CLIENT_VERSION
-    );
+    return readClientVersionFromCacheText(text) ?? DEFAULT_CODEX_CLIENT_VERSION;
   }
 
   private async tryRemoteCatalog(): Promise<string[] | null> {
@@ -148,27 +146,13 @@ export class ModelsCatalog {
     if (this.remoteCache && Date.now() < this.remoteCache.expiresAt) {
       return this.remoteCache.ids;
     }
-    try {
-      const snap = await this.auth.refreshIfStale();
-      const clientVersion = await this.resolveClientVersion();
-      const url = `${CODEX_MODELS_URL}?client_version=${encodeURIComponent(clientVersion)}`;
-      const res = await fetch(url, {
-        method: "GET",
-        headers: {
-          authorization: `Bearer ${snap.accessToken}`,
-          "chatgpt-account-id": snap.accountId,
-          originator: "codex_cli_rs",
-          "user-agent": `codex_cli_rs/${clientVersion} (codex-sub-cursor)`,
-        },
-      });
-      if (!res.ok) return null;
-      const ids = parseModelsResponseJson(await res.text());
-      if (ids.length === 0) return null;
-      this.remoteCache = { ids, expiresAt: Date.now() + REMOTE_MODELS_TTL_MS };
-      return ids;
-    } catch {
-      return null;
-    }
+    const fetched = await fetchRemoteModelSlugs(this.auth, this.cachePath);
+    if (!fetched || fetched.slugs.length === 0) return null;
+    this.remoteCache = {
+      ids: fetched.slugs,
+      expiresAt: Date.now() + REMOTE_MODELS_TTL_MS,
+    };
+    return fetched.slugs;
   }
 
   private async loadFileModelIds(): Promise<string[]> {
@@ -212,4 +196,86 @@ export class ModelsCatalog {
       cachePath: this.cachePath,
     };
   }
+}
+
+export type RemoteModelsFetch = {
+  clientVersion: string;
+  status: number;
+  slugs: string[];
+  error?: string;
+};
+
+export async function fetchRemoteModelSlugs(
+  auth: CodexAuth,
+  cachePath: string,
+): Promise<RemoteModelsFetch | null> {
+  try {
+    const snap = await auth.refreshIfStale();
+    const cacheText = await Bun.file(cachePath).text().catch(() => "");
+    const clientVersion =
+      readClientVersionFromCacheText(cacheText) ?? DEFAULT_CODEX_CLIENT_VERSION;
+    const url = `${CODEX_MODELS_URL}?client_version=${encodeURIComponent(clientVersion)}`;
+    const res = await fetch(url, {
+      method: "GET",
+      headers: {
+        authorization: `Bearer ${snap.accessToken}`,
+        "chatgpt-account-id": snap.accountId,
+        originator: "codex_cli_rs",
+        "user-agent": `codex_cli_rs/${clientVersion} (codex-sub-cursor)`,
+      },
+    });
+    const body = await res.text();
+    if (!res.ok) {
+      return {
+        clientVersion,
+        status: res.status,
+        slugs: [],
+        error: body.slice(0, 500),
+      };
+    }
+    return {
+      clientVersion,
+      status: res.status,
+      slugs: parseModelsResponseJson(body),
+    };
+  } catch (err) {
+    return {
+      clientVersion: DEFAULT_CODEX_CLIENT_VERSION,
+      status: 0,
+      slugs: [],
+      error: (err as Error).message,
+    };
+  }
+}
+
+export type ModelsDebugReport = {
+  cachePath: string;
+  clientVersion: string;
+  remote: RemoteModelsFetch | null;
+  fileSlugs: string[];
+  proxyList: ModelsListResult;
+  note: string;
+};
+
+export async function diagnoseModelsCatalog(authPath?: string): Promise<ModelsDebugReport> {
+  const cachePath = resolveModelsCachePath(authPath);
+  const auth = new CodexAuth(authPath);
+  const remote = await fetchRemoteModelSlugs(auth, cachePath);
+  const cacheText = await Bun.file(cachePath).text().catch(() => "");
+  const clientVersion =
+    readClientVersionFromCacheText(cacheText) ?? DEFAULT_CODEX_CLIENT_VERSION;
+  const fileSlugs = parseModelsCacheJson(cacheText);
+  const catalog = new ModelsCatalog(cachePath, auth);
+  const proxyList = await catalog.listModels();
+  const note =
+    "ChatGPT web may show models (e.g. Sol) that Codex CLI auth rejects on POST /codex/responses. " +
+    "Use slugs from proxyList for Cursor; 400 'not supported with ChatGPT subscription' is upstream.";
+  return {
+    cachePath,
+    clientVersion,
+    remote,
+    fileSlugs,
+    proxyList,
+    note,
+  };
 }

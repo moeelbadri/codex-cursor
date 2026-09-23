@@ -4,13 +4,15 @@
 import type { LogLevel } from "./log.ts";
 import pkg from "../package.json" with { type: "json" };
 import { CodexAuth } from "./auth.ts";
-import { ModelsCatalog } from "./models.ts";
+import { diagnoseModelsCatalog, ModelsCatalog } from "./models.ts";
 import { resolveModelsCachePath } from "./paths.ts";
 import { startServer, type ReasoningEffort, type ServerConfig } from "./server.ts";
 
 const REASONING_EFFORTS: ReasoningEffort[] = ["minimal", "low", "medium", "high", "xhigh"];
 
-function parseArgs(argv: string[]): ServerConfig {
+type ParsedCli = ServerConfig & { modelsDebug: boolean };
+
+function parseArgs(argv: string[]): ParsedCli {
   const env = process.env;
   let port = parseIntOr(env["CODEX_SUB_PORT"], 4141);
   let host = env["CODEX_SUB_HOST"] ?? "127.0.0.1";
@@ -21,6 +23,7 @@ function parseArgs(argv: string[]): ServerConfig {
     "xhigh",
   );
   let logLevel: LogLevel = parseLogLevel(env["CODEX_SUB_LOG_LEVEL"], "info");
+  let modelsDebug = false;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -29,8 +32,9 @@ function parseArgs(argv: string[]): ServerConfig {
       case "--help":
         printHelp();
         process.exit(0);
-      // fallthrough not reached; switch above exits.
-      // eslint-disable-next-line no-fallthrough
+      case "--models-debug":
+        modelsDebug = true;
+        break;
       case "--port":
         port = parseIntOr(argv[++i], port);
         break;
@@ -63,7 +67,7 @@ function parseArgs(argv: string[]): ServerConfig {
     }
   }
 
-  return { host, port, apiKey, authPath, defaultReasoningEffort, logLevel };
+  return { host, port, apiKey, authPath, defaultReasoningEffort, logLevel, modelsDebug };
 }
 
 function parseIntOr(value: string | undefined, fallback: number): number {
@@ -107,6 +111,7 @@ Flags:
   --api-key <secret>        Require this bearer token from clients (env CODEX_SUB_API_KEY)
   --auth-path <path>        Path to codex auth.json (default: ~/.codex/auth.json)
   --reasoning-effort <lvl>  minimal|low|medium|high|xhigh (default: xhigh)
+  --models-debug            Print live/file model catalog diagnostics and exit
   --quiet                   Suppress per-request logs (env CODEX_SUB_LOG_LEVEL=quiet)
   --verbose                 Log a preview of each request's last user message
   --log-level <lvl>         quiet|info|verbose (default: info)
@@ -117,34 +122,57 @@ Cursor setup:
     Override API Key:    <whatever you like, or the value of --api-key>
     Override Base URL:   http://127.0.0.1:<port>/v1
   Then add a custom model name like "gpt-5-codex" or "gpt-5.5".
+
+Install tip: npm/npx caches github packages. Pin a commit if the version line
+looks stale, e.g. npx github:moeelbadri/codex-cursor#de31bef
 `);
 }
 
-const config = parseArgs(process.argv.slice(2));
-const server = startServer(config);
-console.log(
-  `codex-cursor v${pkg.version} listening on http://${config.host}:${server.port}\n` +
-    `  base URL for Cursor: http://${config.host}:${server.port}/v1\n` +
-    `  auth required:       ${config.apiKey ? "yes" : "no"}\n` +
-    `  reasoning effort:    ${config.defaultReasoningEffort} (used when client omits it; client choice wins otherwise)\n` +
-    `  log level:           ${config.logLevel}\n` +
-    `  cursor needs a public URL \u2014 expose this with:\n` +
-    `    cloudflared tunnel --url http://${config.host}:${server.port}`,
-);
+async function main(): Promise<void> {
+  const config = parseArgs(process.argv.slice(2));
 
-const modelsPath = resolveModelsCachePath(config.authPath);
-const startupAuth = new CodexAuth(config.authPath);
-void new ModelsCatalog(modelsPath, startupAuth).listModels().then((listed) => {
-  process.stdout.write(
-    `  models list:         ${listed.source} (${listed.ids.length} ids)\n` +
-      `  models cache file:   ${listed.cachePath}\n`,
+  if (config.modelsDebug) {
+    const report = await diagnoseModelsCatalog(config.authPath);
+    console.log(JSON.stringify({ version: pkg.version, ...report }, null, 2));
+    return;
+  }
+
+  const server = startServer(config);
+  console.log(
+    `codex-cursor v${pkg.version} listening on http://${config.host}:${server.port}\n` +
+      `  base URL for Cursor: http://${config.host}:${server.port}/v1\n` +
+      `  auth required:       ${config.apiKey ? "yes" : "no"}\n` +
+      `  reasoning effort:    ${config.defaultReasoningEffort} (used when client omits it; client choice wins otherwise)\n` +
+      `  log level:           ${config.logLevel}\n` +
+      `  cursor needs a public URL \u2014 expose this with:\n` +
+      `    cloudflared tunnel --url http://${config.host}:${server.port}`,
   );
-});
 
-const shutdown = () => {
-  console.log("\nshutting down");
-  server.stop();
-  process.exit(0);
-};
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
+  const modelsPath = resolveModelsCachePath(config.authPath);
+  const startupAuth = new CodexAuth(config.authPath);
+  void new ModelsCatalog(modelsPath, startupAuth).listModels().then((listed) => {
+    process.stdout.write(
+      `  models list:         ${listed.source} (${listed.ids.length} ids)\n` +
+        `  models cache file:   ${listed.cachePath}\n`,
+    );
+    if (listed.source === "remote" && listed.ids.length < 3) {
+      process.stdout.write(
+        `  \x1b[33mwarning:\x1b[0m remote catalog is very small — upgrade to latest ` +
+          `codex-cursor or run with --models-debug (stale npx cache often pins old versions).\n`,
+      );
+    }
+  });
+
+  const shutdown = () => {
+    console.log("\nshutting down");
+    server.stop();
+    process.exit(0);
+  };
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+}
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
