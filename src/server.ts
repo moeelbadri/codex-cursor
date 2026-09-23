@@ -11,7 +11,14 @@ import {
   isChatCompletionsShapedBody,
   isResponsesShapedBody,
 } from "./convert.ts";
-import { type LogLevel, RequestLogger, usageFromCompleted, type Usage } from "./log.ts";
+import {
+  type LogLevel,
+  type LogResult,
+  RequestLogger,
+  usageFromCompleted,
+  type Usage,
+} from "./log.ts";
+import { QuotaClient } from "./quota.ts";
 import { UpstreamClient, UpstreamError, type UpstreamStream } from "./upstream.ts";
 
 // Mirrors the Codex CLI's reasoning effort enum (codex-rs/protocol/openai_models.rs).
@@ -52,6 +59,7 @@ const PUBLISHED_MODELS = [
 export function startServer(config: ServerConfig): ReturnType<typeof Bun.serve> {
   const auth = new CodexAuth(config.authPath);
   const upstream = new UpstreamClient(auth);
+  const quota = new QuotaClient(auth);
   const sessionId = crypto.randomUUID();
 
   const server = Bun.serve({
@@ -59,7 +67,7 @@ export function startServer(config: ServerConfig): ReturnType<typeof Bun.serve> 
     port: config.port,
     // Reasoning streams can take a while; let the request idle.
     idleTimeout: 240,
-    fetch: (req) => handle(req, { config, upstream, sessionId }),
+    fetch: (req) => handle(req, { config, upstream, quota, sessionId }),
   });
   return server;
 }
@@ -67,8 +75,19 @@ export function startServer(config: ServerConfig): ReturnType<typeof Bun.serve> 
 type RequestCtx = {
   config: ServerConfig;
   upstream: UpstreamClient;
+  quota: QuotaClient;
   sessionId: string;
 };
+
+async function completeRequestLog(
+  logger: RequestLogger,
+  ctx: RequestCtx,
+  result: LogResult,
+): Promise<void> {
+  const quota =
+    ctx.config.logLevel === "quiet" ? null : await ctx.quota.fetchSnapshot();
+  logger.complete({ ...result, quota });
+}
 
 async function handle(req: Request, ctx: RequestCtx): Promise<Response> {
   const url = new URL(req.url);
@@ -360,14 +379,14 @@ async function handleResponsesPassthrough(
   } catch (err) {
     if (err instanceof UpstreamError) {
       const { status, body } = err.toOpenAiError();
-      logger.complete({
+      await completeRequestLog(logger, ctx, {
         status,
         upstreamRequestId: err.requestId,
         error: body.error.message,
       });
       return Response.json(body, { status });
     }
-    logger.complete({ status: 502, error: (err as Error).message });
+    await completeRequestLog(logger, ctx, { status: 502, error: (err as Error).message });
     return Response.json(
       { error: { message: (err as Error).message, type: "server_error", code: null } },
       { status: 502 },
@@ -377,7 +396,7 @@ async function handleResponsesPassthrough(
   if (!wantsStream) {
     // Cursor always streams; collect anyway and return the final response
     // object so this path remains useful for direct curl testing.
-    return handleResponsesNonStreaming(stream, logger);
+    return handleResponsesNonStreaming(stream, logger, ctx);
   }
 
   let capturedUsage: Usage | null = null;
@@ -407,7 +426,7 @@ async function handleResponsesPassthrough(
           if (formatted) controller.enqueue(encoder.encode(formatted));
         }
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-        logger.complete({
+        await completeRequestLog(logger, ctx, {
           status: 200,
           finishReason: capturedFinishReason,
           serverModel: capturedServerModel,
@@ -417,7 +436,7 @@ async function handleResponsesPassthrough(
       } catch (err) {
         controller.enqueue(encoder.encode(formatChatCompletionError((err as Error).message)));
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-        logger.complete({
+        await completeRequestLog(logger, ctx, {
           status: 502,
           error: (err as Error).message,
           upstreamRequestId: stream.upstreamRequestId,
@@ -449,6 +468,7 @@ async function handleResponsesNonStreaming(
     serverModel: string | null;
   },
   logger: RequestLogger,
+  ctx: RequestCtx,
 ): Promise<Response> {
   let final: Record<string, unknown> | null = null;
   let usage: Usage | null = null;
@@ -463,7 +483,7 @@ async function handleResponsesNonStreaming(
       }
     }
   } catch (err) {
-    logger.complete({
+    await completeRequestLog(logger, ctx, {
       status: 502,
       error: (err as Error).message,
       upstreamRequestId: stream.upstreamRequestId,
@@ -473,7 +493,7 @@ async function handleResponsesNonStreaming(
       { status: 502 },
     );
   }
-  logger.complete({
+  await completeRequestLog(logger, ctx, {
     status: 200,
     finishReason: "stop",
     serverModel,

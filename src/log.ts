@@ -1,10 +1,12 @@
+import type { QuotaSnapshot } from "./quota.ts";
+
 // Per-request console logger. Designed so a quick glance at the proxy
 // terminal makes it obvious whether Cursor is actually hitting it (vs.
 // silently falling back to its own provider).
 //
 // One line per chat completion is emitted on completion or error, e.g.:
 //
-//   [14:23:01] gpt-5.5 stream msgs=3 tools=1 → 200  in=14 out=42 (r24) tot=56  1.2s  stop  req=req_abc
+//   [14:23:01] gpt-5.5 stream msgs=3 tools=1 → 200 in=14 out=42 tot=56 | 5h=12% used 88% left | wk=40% used 60% left 1.2s stop
 //
 // With --verbose, a second indented line shows a preview of the latest user
 // message so you can correlate with what you typed in Cursor.
@@ -47,6 +49,7 @@ export type LogResult = {
   serverModel?: string | null;
   upstreamRequestId?: string | null;
   usage?: Usage | null;
+  quota?: QuotaSnapshot | null;
   error?: string;
 };
 
@@ -77,6 +80,7 @@ export class RequestLogger {
       ? `${C.red}${truncate(result.error, 80)}${C.reset}`
       : finishLabel(result.finishReason ?? "stop");
     const tokens = result.usage ? formatUsage(result.usage) : `${C.dim}(no usage)${C.reset}`;
+    const quota = result.quota ? formatQuota(result.quota) : "";
     const reqId = result.upstreamRequestId
       ? ` ${C.dim}req=${result.upstreamRequestId}${C.reset}`
       : "";
@@ -89,8 +93,9 @@ export class RequestLogger {
       `${C.cyan}${this.ctx.model}${C.reset}${serverModel} ` +
       `${this.modeLabel()} ` +
       `${C.dim}msgs=${this.ctx.messageCount} tools=${this.ctx.toolCount}${C.reset} ` +
-      `→ ${status} ${tokens} ` +
-      `${formatDuration(elapsed)} ${finish}${reqId}\n`;
+      `→ ${status} ${tokens}` +
+      (quota ? ` ${quota}` : "") +
+      ` ${formatDuration(elapsed)} ${finish}${reqId}\n`;
     process.stdout.write(line);
   }
 
@@ -119,6 +124,54 @@ export function usageFromCompleted(
     reasoningTokens: reasoning,
     totalTokens: numberOr(u["total_tokens"], input + output),
   };
+}
+
+export function formatQuota(q: QuotaSnapshot): string {
+  const parts: string[] = [];
+  if (q.primary) {
+    parts.push(
+      `${windowLabel(q.primary.windowSeconds, "5h")}=${formatWindowQuota(q.primary)}`,
+    );
+  }
+  if (q.secondary) {
+    parts.push(
+      `${windowLabel(q.secondary.windowSeconds, "wk")}=${formatWindowQuota(q.secondary)}`,
+    );
+  }
+  if (parts.length === 0) return "";
+  return `${C.dim}|${C.reset} ${parts.join(` ${C.dim}|${C.reset} `)}`;
+}
+
+function windowLabel(windowSeconds: number | null, fallback: string): string {
+  if (windowSeconds === 18_000) return "5h";
+  if (windowSeconds === 604_800) return "wk";
+  return fallback;
+}
+
+function formatWindowQuota(w: NonNullable<QuotaSnapshot["primary"]>): string {
+  const used = `${w.usedPercent.toFixed(1)}% used`;
+  const left = `${w.remainingPercent.toFixed(1)}% left`;
+  const reset = w.resetAt ? ` ${formatResetIn(w.resetAt)}` : "";
+  return `${C.yellow}${used}${C.reset} ${C.green}${left}${C.reset}${reset}`;
+}
+
+function formatResetIn(resetAtUnixSec: number): string {
+  const deltaSec = Math.max(0, resetAtUnixSec - Math.floor(Date.now() / 1000));
+  if (deltaSec < 60) return `${C.dim}resets ${deltaSec}s${C.reset}`;
+  const mins = Math.floor(deltaSec / 60);
+  if (mins < 120) return `${C.dim}resets ${mins}m${C.reset}`;
+  const hours = Math.floor(mins / 60);
+  const remMins = mins % 60;
+  if (hours < 48) {
+    return remMins > 0
+      ? `${C.dim}resets ${hours}h${remMins}m${C.reset}`
+      : `${C.dim}resets ${hours}h${C.reset}`;
+  }
+  const days = Math.floor(hours / 24);
+  const remHours = hours % 24;
+  return remHours > 0
+    ? `${C.dim}resets ${days}d${remHours}h${C.reset}`
+    : `${C.dim}resets ${days}d${C.reset}`;
 }
 
 function formatUsage(u: Usage): string {

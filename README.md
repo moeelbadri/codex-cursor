@@ -49,6 +49,10 @@ Flags / env vars:
 | `--reasoning-effort lvl` | `CODEX_SUB_REASONING_EFFORT`  | `xhigh` (`minimal`, `low`, `medium`, `high`, `xhigh`) |
 | `--quiet` / `--verbose` / `--log-level lvl` | `CODEX_SUB_LOG_LEVEL` | `info` (`quiet`, `info`, `verbose`) |
 
+At `info` / `verbose`, each completed request line includes your Codex **5-hour**
+and **weekly** quota (`used` / `left`, plus time until reset), fetched from the
+same `GET /wham/usage` endpoint the Codex app uses.
+
 **Always set `--api-key` when exposing the proxy via a tunnel** — the public
 URL is otherwise an open Codex-subscription faucet.
 
