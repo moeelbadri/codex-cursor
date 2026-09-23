@@ -49,6 +49,10 @@ Flags / env vars:
 | `--reasoning-effort lvl` | `CODEX_SUB_REASONING_EFFORT`  | `xhigh` (`minimal`, `low`, `medium`, `high`, `xhigh`) |
 | `--quiet` / `--verbose` / `--log-level lvl` | `CODEX_SUB_LOG_LEVEL` | `info` (`quiet`, `info`, `verbose`) |
 
+At `info` / `verbose`, each completed request line includes your Codex **5-hour**
+and **weekly** quota (`used` / `left`, plus time until reset), fetched from the
+same `GET /wham/usage` endpoint the Codex app uses.
+
 **Always set `--api-key` when exposing the proxy via a tunnel** — the public
 URL is otherwise an open Codex-subscription faucet.
 
@@ -81,7 +85,9 @@ cloudflared tunnel --url http://127.0.0.1:4141
 3. Click **Verify**.
 4. In the model picker, add a custom model. Working slugs:
    `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.3-codex`, `gpt-5.3-codex-spark`.
-   The exact list is returned by `GET /v1/models`.
+   The list comes from `GET /v1/models`, which reads slugs from your local
+   Codex CLI cache (`~/.codex/models_cache.json`). Refresh it with
+   `codex debug models` (or any recent `codex` run) if new models are missing.
 
 ## Caveats
 

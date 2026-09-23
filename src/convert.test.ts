@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { chatCompletionsToResponses } from "./convert.ts";
+import { chatCompletionsToResponses, responsesFunctionCallItemId } from "./convert.ts";
 
 describe("chatCompletionsToResponses", () => {
   test("maps user messages to Responses input", () => {
@@ -75,7 +75,7 @@ describe("chatCompletionsToResponses", () => {
       },
       {
         type: "function_call",
-        id: "call_abc",
+        id: "fc_abc",
         call_id: "call_abc",
         name: "foo",
         arguments: '{"x":1}',
@@ -87,5 +87,12 @@ describe("chatCompletionsToResponses", () => {
         output: '{"ok":true}',
       },
     ]);
+  });
+
+  test("responsesFunctionCallItemId maps call_* to fc_*", () => {
+    expect(responsesFunctionCallItemId("call_A6bmyzBws2ojwHc5ZjjkVPTt")).toBe(
+      "fc_A6bmyzBws2ojwHc5ZjjkVPTt",
+    );
+    expect(responsesFunctionCallItemId("fc_existing")).toBe("fc_existing");
   });
 });

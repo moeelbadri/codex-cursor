@@ -1,8 +1,11 @@
 #!/usr/bin/env bun
 // Entry point. Parses CLI flags / env vars and starts the proxy.
 
-import { startServer, type ReasoningEffort, type ServerConfig } from "./server.ts";
 import type { LogLevel } from "./log.ts";
+import pkg from "../package.json" with { type: "json" };
+import { ModelsCatalog } from "./models.ts";
+import { resolveModelsCachePath } from "./paths.ts";
+import { startServer, type ReasoningEffort, type ServerConfig } from "./server.ts";
 
 const REASONING_EFFORTS: ReasoningEffort[] = ["minimal", "low", "medium", "high", "xhigh"];
 
@@ -119,7 +122,7 @@ Cursor setup:
 const config = parseArgs(process.argv.slice(2));
 const server = startServer(config);
 console.log(
-  `codex-cursor listening on http://${config.host}:${server.port}\n` +
+  `codex-cursor v${pkg.version} listening on http://${config.host}:${server.port}\n` +
     `  base URL for Cursor: http://${config.host}:${server.port}/v1\n` +
     `  auth required:       ${config.apiKey ? "yes" : "no"}\n` +
     `  reasoning effort:    ${config.defaultReasoningEffort} (used when client omits it; client choice wins otherwise)\n` +
@@ -127,6 +130,14 @@ console.log(
     `  cursor needs a public URL \u2014 expose this with:\n` +
     `    cloudflared tunnel --url http://${config.host}:${server.port}`,
 );
+
+const modelsPath = resolveModelsCachePath(config.authPath);
+void new ModelsCatalog(modelsPath).listModels().then((listed) => {
+  process.stdout.write(
+    `  models list:         ${listed.source} (${listed.ids.length} ids)\n` +
+      `  models cache file:   ${listed.cachePath}\n`,
+  );
+});
 
 const shutdown = () => {
   console.log("\nshutting down");
