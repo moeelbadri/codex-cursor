@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { FALLBACK_MODEL_IDS, parseModelsCacheJson } from "./models.ts";
+import {
+  FALLBACK_MODEL_IDS,
+  mergeModelSlugLists,
+  parseModelsCacheJson,
+  readClientVersionFromCacheText,
+} from "./models.ts";
 
 describe("parseModelsCacheJson", () => {
   test("returns slugs sorted by priority", () => {
@@ -15,6 +20,19 @@ describe("parseModelsCacheJson", () => {
       }),
     );
     expect(ids).toEqual(["gpt-5.5", "gpt-5.4", "api-only"]);
+  });
+
+  test("readClientVersionFromCacheText", () => {
+    expect(
+      readClientVersionFromCacheText(JSON.stringify({ client_version: "0.144.4" })),
+    ).toBe("0.144.4");
+    expect(
+      readClientVersionFromCacheText(JSON.stringify({ client_version: [0, 144, 4] })),
+    ).toBe("0.144.4");
+  });
+
+  test("mergeModelSlugLists preserves order and dedupes", () => {
+    expect(mergeModelSlugLists(["a", "b"], ["b", "c"])).toEqual(["a", "b", "c"]);
   });
 
   test("invalid json yields empty list for caller fallback", () => {
