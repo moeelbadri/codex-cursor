@@ -2,8 +2,9 @@
 // `codex` / `codex debug models`). Falls back to a small built-in list when the
 // cache is missing or unreadable.
 
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { resolveModelsCachePath } from "./paths.ts";
+
+export { resolveModelsCachePath };
 
 export const FALLBACK_MODEL_IDS = [
   "gpt-5.5",
@@ -14,11 +15,6 @@ export const FALLBACK_MODEL_IDS = [
   "gpt-5.2",
   "codex-auto-review",
 ];
-
-export function resolveModelsCachePath(authPath?: string): string {
-  const auth = authPath ?? join(homedir(), ".codex", "auth.json");
-  return join(dirname(auth), "models_cache.json");
-}
 
 type CachedModel = {
   slug?: string;
@@ -44,7 +40,9 @@ export function parseModelsCacheJson(text: string): string[] {
     if (!model || typeof model !== "object") continue;
     const slug = model.slug;
     if (typeof slug !== "string" || slug.length === 0) continue;
-    if (model.visibility === "hidden") continue;
+    // Match Codex picker: only `list` (skip hide/none/hidden).
+    const visibility = model.visibility;
+    if (visibility !== undefined && visibility !== "list") continue;
     if (model.supported_in_api === false) continue;
     const priority = typeof model.priority === "number" ? model.priority : 0;
     picked.push({ slug, priority });

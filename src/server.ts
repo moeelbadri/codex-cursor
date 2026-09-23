@@ -18,7 +18,8 @@ import {
   usageFromCompleted,
   type Usage,
 } from "./log.ts";
-import { ModelsCatalog, resolveModelsCachePath } from "./models.ts";
+import { ModelsCatalog } from "./models.ts";
+import { resolveModelsCachePath } from "./paths.ts";
 import { QuotaClient } from "./quota.ts";
 import { UpstreamClient, UpstreamError, type UpstreamStream } from "./upstream.ts";
 

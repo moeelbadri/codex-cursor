@@ -8,7 +8,7 @@ describe("parseModelsCacheJson", () => {
         models: [
           { slug: "gpt-5.4", visibility: "list", priority: 1 },
           { slug: "gpt-5.5", visibility: "list", priority: 10 },
-          { slug: "hidden-model", visibility: "hidden" },
+          { slug: "hidden-model", visibility: "hide" },
           { slug: "nope", supported_in_api: false },
         ],
       }),
